@@ -1,21 +1,22 @@
-use std::{fs::{self, File}, collections::HashMap, mem, env, slice};
+use std::{fs::{self, File}, collections::HashMap, mem, env};
 use std::collections::hash_map;
 use std::ffi::OsStr;
-use std::fmt::Debug;
-use std::io::{Read, Write, Result};
+use std::io::{Read, Result};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::fs::OpenOptionsExt;
+use std::net::Shutdown;
 use udev::{EventType, MonitorBuilder};
 use input_linux::{
-    evdev::EvdevHandle, InputProperty, EventKind, AbsoluteAxis, Key
+    evdev::EvdevHandle, InputProperty, EventKind, AbsoluteAxis, Key, MiscKind
 };
-use libc::{input_event, timeval};
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 
-use hidpipe_shared::{AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello, InputEvent};
-
+use hidpipe_shared::{
+    AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello,
+    InputEvent, empty_input_event, struct_to_socket
+};
 fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
     let props = evdev.device_properties()?;
     let no = Ok(false);
@@ -54,14 +55,16 @@ fn send_add_device<F: AsRawFd>(evdev: &EvdevHandle<F>, client: &mut Client) -> R
     let keybits = evdev.key_bits()?.data().clone();
     let relbits = evdev.relative_bits()?.data().clone();
     let absbits = abs.data().clone();
-    let mscbits = evdev.misc_bits()?.data().clone();
+    let mut mscbits = evdev.misc_bits()?;
+    mscbits.remove(MiscKind::Scancode);
+    let mscbits = mscbits.data().clone();
     let ledbits = evdev.led_bits()?.data().clone();
     let sndbits = evdev.sound_bits()?.data().clone();
     let swbits = evdev.switch_bits()?.data().clone();
     let propbits = evdev.device_properties()?.data().clone();
     let input_id = evdev.device_id()?;
     let ff_effects = evdev.effects_count()? as u32;
-    let id = evdev.as_raw_fd() as u32;
+    let id = evdev.as_raw_fd() as u64;
     let mut name = [0; 80];
     evdev.device_name_buf(&mut name)?;
     client.write(&mut MessageType::AddDevice)?;
@@ -114,10 +117,9 @@ impl EvdevContainer {
             Ok(None)
         }
     }
-    fn remove(&mut self, dev_name: &OsStr, epoll: &Epoll) -> Option<u32> {
+    fn remove(&mut self, dev_name: &OsStr, epoll: &Epoll) -> Option<u64> {
         if let Some(id) = self.names_to_fds.remove(dev_name.to_string_lossy().as_ref()) {
-            let id = id as u32;
-            let evdev = self.fds_to_devs.remove(&(id as u64)).unwrap();
+            let evdev = self.fds_to_devs.remove(&id).unwrap();
             epoll.delete(evdev.as_inner()).unwrap();
             Some(id)
         } else {
@@ -174,15 +176,8 @@ impl Client {
             ReadReply::NotReady
         })
     }
-    fn write<T: Debug>(&mut self, data: &mut T) -> Result<()> {
-        let size = mem::size_of::<T>();
-        // SAFETY:
-        // 1. We are taking a ref, so it is valid for reads and properly aligned
-        // 2. We are taking a mut ref, so nobody but us can write to it
-        let v = unsafe {
-            slice::from_raw_parts(data as *mut T as *const u8, size)
-        };
-        self.socket.write_all(v)
+    fn write<T>(&mut self, data: &mut T) -> Result<()> {
+        struct_to_socket(&mut self.socket, data)
     }
 }
 
@@ -314,35 +309,50 @@ fn main() {
             clients.insert(raw, client);
         } else if let Some(client) = clients.get(&fd) {
             if client.ready {
-                continue
-            }
-            let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<ClientHello>());
-            if data.is_none() {
-                continue
-            }
-            hangup_on_error(&mut clients, &epoll, fd, |client| {
-                client.write(&mut ServerHello {
-                    version: 0
-                })?;
-                for dev in evdevs.iter() {
-                    send_add_device(dev, client)?;
+                let size = mem::size_of::<MessageType>() + mem::size_of::<InputEvent>();
+                let data = recv_from_client(&mut clients, &epoll, fd, size);
+                if data.is_none() {
+                    continue
                 }
-                client.ready = true;
-                Ok(())
-            });
+                let data = data.unwrap();
+                let msg_type = u32::from_ne_bytes(data[..4].try_into().unwrap());
+                if msg_type != MessageType::InputEvent as u32 {
+                    eprintln!("Unknown message {} from client {}", msg_type, fd);
+                    clients.get(&fd).unwrap().socket.shutdown(Shutdown::Both).unwrap();
+                    continue;
+                }
+                let event = unsafe {
+                    (data[4..].as_ptr() as *const InputEvent).as_ref().unwrap()
+                };
+                let evdev = evdevs.get(event.id);
+                if evdev.is_none() {
+                    eprintln!("Client {} sent input to unknow device {}", fd, event.id);
+                    continue;
+                }
+                evdev.unwrap().write(&[event.to_input_event()]).unwrap();
+            } else {
+                let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<ClientHello>());
+                if data.is_none() {
+                    continue
+                }
+                hangup_on_error(&mut clients, &epoll, fd, |client| {
+                    client.write(&mut ServerHello {
+                        version: 0
+                    })?;
+                    for dev in evdevs.iter() {
+                        send_add_device(dev, client)?;
+                    }
+                    client.ready = true;
+                    Ok(())
+                });
+            }
         } else if let Some(evdev) = evdevs.get(fd) {
-            let evt = input_event {
-                time: timeval { tv_sec: 0, tv_usec: 0 },
-                type_: 0,
-                code: 0,
-                value: 0,
-            };
-            let mut evts = [evt];
+            let mut evts = [empty_input_event()];
             while let Ok(count) = evdev.read(&mut evts) {
                 if count == 0 {
                     break;
                 }
-                let mut ev = InputEvent::new(fd as u32, evts[0].into());
+                let mut ev = InputEvent::new(fd, evts[0].into());
                 hangup_on_error_bcast(&mut clients, &epoll, |client| {
                     if !client.ready {
                         return Ok(());
