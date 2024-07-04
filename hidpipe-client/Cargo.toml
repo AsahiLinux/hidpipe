@@ -11,3 +11,4 @@ input-linux = { workspace = true }
 input-linux-sys = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
+posix-acl = "1"

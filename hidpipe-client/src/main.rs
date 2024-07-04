@@ -1,3 +1,4 @@
+use std::env;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::fs::OpenOptionsExt;
@@ -18,6 +19,7 @@ use hidpipe_shared::{
     AddDevice, ClientHello, MessageType, RemoveDevice, ServerHello,
     InputEvent, empty_input_event, struct_to_socket
 };
+use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
 const REMOVE_DEVICE: u32 = MessageType::RemoveDevice as u32;
@@ -30,7 +32,7 @@ fn bitmask_from_slice<T, A>(s: &T::Array) -> Bitmask<T> where
     bm
 }
 
-fn init_uinput(sock: &mut UnixStream) -> (u64, UInputHandle<File>) {
+fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>) {
     let mut add_dev_data = [0u8; mem::size_of::<AddDevice>()];
     sock.read_exact(&mut add_dev_data).unwrap();
     let add_dev = unsafe {
@@ -93,10 +95,14 @@ fn init_uinput(sock: &mut UnixStream) -> (u64, UInputHandle<File>) {
         ff_effects_max: add_dev.ff_effects,
     }).unwrap();
     uinput.dev_create().unwrap();
+    let mut acl = PosixACL::read_acl(uinput.evdev_path().unwrap()).unwrap();
+    acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
+    acl.write_acl(uinput.evdev_path().unwrap()).unwrap();
     (add_dev.id, uinput)
 }
 
 fn main() {
+    let user_id = env::args().nth(1).unwrap().parse::<u32>().unwrap();
     let sock_fd = socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None).unwrap();
     connect(sock_fd.as_raw_fd(), &VsockAddr::new(2, 3334)).unwrap();
     let mut sock = UnixStream::from(sock_fd);
@@ -130,7 +136,7 @@ fn main() {
             sock.read_exact(&mut cmd_data).unwrap();
             match u32::from_ne_bytes(cmd_data) {
                 ADD_DEVICE => {
-                    let (id, uinput) = init_uinput(&mut sock);
+                    let (id, uinput) = init_uinput(&mut sock, user_id);
                     let raw = uinput.as_inner().as_raw_fd() as u64;
                     epoll.add(uinput.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw)).unwrap();
                     inputs_by_id.insert(id, uinput);
@@ -163,7 +169,7 @@ fn main() {
                 m => panic!("Unknown message {}", m)
             }
         } else if let Some(id) = fd_to_id.get(&fd) {
-            let uinput = inputs_by_id.get(&id).unwrap();
+            let uinput = inputs_by_id.get(id).unwrap();
             let mut evts = [empty_input_event()];
             while let Ok(count) = uinput.read(&mut evts) {
                 if count == 0 {

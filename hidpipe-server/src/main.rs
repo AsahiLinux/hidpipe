@@ -36,7 +36,7 @@ fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
         return no;
     }
     let keys = evdev.key_mask()?;
-    return Ok(keys.get(Key::ButtonTrigger) ||
+    Ok(keys.get(Key::ButtonTrigger) ||
               keys.get(Key::ButtonSouth) ||
               keys.get(Key::Button1) ||
               axes.get(AbsoluteAxis::RX) ||
@@ -46,22 +46,22 @@ fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
               axes.get(AbsoluteAxis::Wheel) ||
               axes.get(AbsoluteAxis::Gas) ||
               axes.get(AbsoluteAxis::Brake)
-    );
+    )
 }
 
 fn send_add_device<F: AsRawFd>(evdev: &EvdevHandle<F>, client: &mut Client) -> Result<()> {
     let abs = evdev.absolute_bits()?;
-    let evbits = evdev.event_bits()?.data().clone();
-    let keybits = evdev.key_bits()?.data().clone();
-    let relbits = evdev.relative_bits()?.data().clone();
-    let absbits = abs.data().clone();
+    let evbits = *evdev.event_bits()?.data();
+    let keybits = *evdev.key_bits()?.data();
+    let relbits = *evdev.relative_bits()?.data();
+    let absbits = *abs.data();
     let mut mscbits = evdev.misc_bits()?;
     mscbits.remove(MiscKind::Scancode);
-    let mscbits = mscbits.data().clone();
-    let ledbits = evdev.led_bits()?.data().clone();
-    let sndbits = evdev.sound_bits()?.data().clone();
-    let swbits = evdev.switch_bits()?.data().clone();
-    let propbits = evdev.device_properties()?.data().clone();
+    let mscbits = *mscbits.data();
+    let ledbits = *evdev.led_bits()?.data();
+    let sndbits = *evdev.sound_bits()?.data();
+    let swbits = *evdev.switch_bits()?.data();
+    let propbits = *evdev.device_properties()?.data();
     let input_id = evdev.device_id()?;
     let ff_effects = evdev.effects_count()? as u32;
     let id = evdev.as_raw_fd() as u64;
@@ -157,7 +157,7 @@ impl Client {
         }
     }
     fn read(&mut self, size: usize) -> Result<ReadReply> {
-        if self.buf.len() == 0 {
+        if self.buf.is_empty() {
             self.buf.resize(size, 0);
         } else if self.buf.len() != size {
             panic!("api misuse");
@@ -278,7 +278,7 @@ fn main() {
                         if node.is_none() {
                             continue;
                         }
-                        let res = evdevs.check_and_add(&name, node.unwrap().as_os_str(), &epoll);
+                        let res = evdevs.check_and_add(name, node.unwrap().as_os_str(), &epoll);
                         match res {
                             Err(e) => {
                                 eprintln!("Unable to determine if {} is a joystick, error: {:?}", name.to_string_lossy(), e);
@@ -352,7 +352,7 @@ fn main() {
                 if count == 0 {
                     break;
                 }
-                let mut ev = InputEvent::new(fd, evts[0].into());
+                let mut ev = InputEvent::new(fd, evts[0]);
                 hangup_on_error_bcast(&mut clients, &epoll, |client| {
                     if !client.ready {
                         return Ok(());
