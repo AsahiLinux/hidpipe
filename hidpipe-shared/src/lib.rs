@@ -3,10 +3,10 @@ use std::{slice, mem};
 use std::io::{Result, Write};
 use std::os::unix::net::UnixStream;
 use input_linux::{
-    InputProperty, EventKind, AbsoluteAxis, Key, RelativeAxis,
+    InputProperty, EventKind, AbsoluteAxis, Key, RelativeAxis, ForceFeedbackKind,
     MiscKind, LedKind, SoundKind, SwitchKind, InputId, bitmask::BitmaskTrait
 };
-use input_linux::sys::{input_event, timeval};
+use input_linux::sys::{input_event, timeval, ff_effect};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -25,7 +25,25 @@ pub struct ServerHello {
 pub enum MessageType {
     AddDevice,
     RemoveDevice,
-    InputEvent
+    InputEvent,
+    FFUpload,
+    FFErase
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct FFUpload {
+    pub id: u64,
+    pub request_id: u32,
+    pub effect: ff_effect
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct FFErase {
+    pub id: u64,
+    pub request_id: u32,
+    pub effect_id: u32,
 }
 
 #[repr(C)]
@@ -41,6 +59,7 @@ pub struct AddDevice {
     pub sndbits: <SoundKind as BitmaskTrait>::Array,
     pub swbits: <SwitchKind as BitmaskTrait>::Array,
     pub propbits: <InputProperty as BitmaskTrait>::Array,
+    pub ffbits: <ForceFeedbackKind as BitmaskTrait>::Array,
     pub input_id: InputId,
     pub ff_effects: u32,
     pub name: [c_char; 80],
@@ -96,13 +115,12 @@ pub fn empty_input_event() -> input_event {
     }
 }
 
-pub fn struct_to_socket<T>(socket: &mut UnixStream, data: &mut T) -> Result<()> {
+pub fn struct_to_socket<T>(socket: &mut UnixStream, data: &T) -> Result<()> {
     let size = mem::size_of::<T>();
     // SAFETY:
-    // 1. We are taking a ref, so it is valid for reads and properly aligned
-    // 2. We are taking a mut ref, so nobody but us can write to it
+    // We are taking a ref, so it is valid for reads, properly aligned, and nobody can write to it
     let v = unsafe {
-        slice::from_raw_parts(data as *mut T as *const u8, size)
+        slice::from_raw_parts(data as *const T as *const u8, size)
     };
     socket.write_all(v)
 }

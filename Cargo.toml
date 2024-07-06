@@ -9,7 +9,7 @@ license = "MIT"
 description = "Pass hid devices to micro vms."
 
 [workspace.dependencies]
-input-linux = "0.6"
-input-linux-sys = "0.8"
+input-linux = { git = "https://github.com/WhatAmISupposedToPutHere/input-linux-rs" }
+input-linux-sys = { git = "https://github.com/WhatAmISupposedToPutHere/input-linux-sys-rs" }
 nix = { version = "0.29", features = ["event", "socket"] }
 libc = "0.2"

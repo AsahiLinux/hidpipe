@@ -80,9 +80,8 @@ dependencies = [
 
 [[package]]
 name = "input-linux"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f403224ea808abe6182696e3a36d9875c0e942ba7c99239f9ef545b96e35606"
+version = "0.7.0"
+source = "git+https://github.com/WhatAmISupposedToPutHere/input-linux-rs#ef1d6fc7d2da55669d18efe5ee22aa066e4a1fb9"
 dependencies = [
  "input-linux-sys",
  "nix 0.26.4",
@@ -90,9 +89,8 @@ dependencies = [
 
 [[package]]
 name = "input-linux-sys"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a687a25a4973027df9153753a5589f97fe1e958f694a34eea5606ae65299ab8"
+version = "0.9.0"
+source = "git+https://github.com/WhatAmISupposedToPutHere/input-linux-sys-rs#ca9915bb2cb8c712b9caa5e4d49be414cf576083"
 dependencies = [
  "libc",
  "nix 0.26.4",

@@ -8,22 +8,28 @@ use std::fs::File;
 use std::io::{Read, Write};
 use input_linux::{
     AbsoluteAxis, AbsoluteInfo, Bitmask, EventKind, InputProperty, Key,
-    LedKind, MiscKind, RelativeAxis, SoundKind, SwitchKind, UInputHandle
+    LedKind, MiscKind, RelativeAxis, SoundKind, SwitchKind, UInputHandle,
+    ForceFeedbackKind, UInputKind
 };
 use input_linux::bitmask::BitmaskTrait;
-use input_linux_sys::{uinput_setup, input_id, uinput_abs_setup, input_absinfo};
+use input_linux_sys::{
+    uinput_setup, input_id, uinput_abs_setup, input_absinfo, ff_effect,
+    ff_trigger, ff_replay, uinput_ff_upload, uinput_ff_erase
+};
 use nix::errno::Errno;
 use nix::sys::socket::{AddressFamily, connect, socket, SockFlag, SockType, VsockAddr};
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 use hidpipe_shared::{
-    AddDevice, ClientHello, MessageType, RemoveDevice, ServerHello,
-    InputEvent, empty_input_event, struct_to_socket
+    AddDevice, ClientHello, MessageType, RemoveDevice, ServerHello, InputEvent,
+    empty_input_event, struct_to_socket, FFUpload, FFErase
 };
 use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
 const REMOVE_DEVICE: u32 = MessageType::RemoveDevice as u32;
 const INPUT_EVENT: u32 = MessageType::InputEvent as u32;
+const FF_UPLOAD: u32 = MessageType::FFUpload as u32;
+const FF_ERASE: u32 = MessageType::FFErase as u32;
 
 fn bitmask_from_slice<T, A>(s: &T::Array) -> Bitmask<T> where
     A: AsRef<[u8]>, T: BitmaskTrait<Array = A> {
@@ -84,6 +90,9 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
     for propbit in bitmask_from_slice::<InputProperty, _>(&add_dev.propbits).iter() {
         uinput.set_propbit(propbit).unwrap();
     }
+    for ffbit in bitmask_from_slice::<ForceFeedbackKind, _>(&add_dev.ffbits).iter() {
+        uinput.set_ffbit(ffbit).unwrap();
+    }
     uinput.dev_setup(&uinput_setup {
         id: input_id {
             bustype: add_dev.input_id.bustype,
@@ -99,6 +108,23 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
     acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
     acl.write_acl(uinput.evdev_path().unwrap()).unwrap();
     (add_dev.id, uinput)
+}
+
+fn ff_effect_empty() -> ff_effect {
+    ff_effect {
+        type_: 0,
+        id: 0,
+        direction: 0,
+        trigger: ff_trigger {
+            button: 0,
+            interval: 0
+        },
+        replay: ff_replay {
+            length: 0,
+            delay: 0
+        },
+        u: [0; 4]
+    }
 }
 
 fn main() {
@@ -119,6 +145,8 @@ fn main() {
     epoll.add(&sock, EpollEvent::new(EpollFlags::EPOLLIN, sock.as_raw_fd() as u64)).unwrap();
     let mut inputs_by_id = HashMap::new();
     let mut fd_to_id = HashMap::new();
+    let mut ff_uploads = HashMap::<u32, uinput_ff_upload>::new();
+    let mut ff_erases = HashMap::<u32, uinput_ff_erase>::new();
     loop {
         let mut evts = [EpollEvent::empty()];
         match epoll.wait(&mut evts, EpollTimeout::NONE) {
@@ -149,7 +177,8 @@ fn main() {
                         (remove_dev_data.as_ptr() as *const RemoveDevice).as_ref().unwrap()
                     };
                     if let Some(uinput) = inputs_by_id.remove(&remove_dev.id) {
-                        fd_to_id.remove(&(uinput.as_inner().as_raw_fd() as u64));
+                        let raw = uinput.as_inner().as_raw_fd() as u64;
+                        fd_to_id.remove(&raw);
                         epoll.delete(uinput.as_inner()).unwrap();
                         uinput.dev_destroy().unwrap();
                     }
@@ -165,6 +194,35 @@ fn main() {
                         continue;
                     }
                     dev.unwrap().write(&[event.to_input_event()]).unwrap();
+                },
+                FF_UPLOAD => {
+                    let mut upload_data = [0u8; mem::size_of::<FFUpload>()];
+                    sock.read_exact(&mut upload_data).unwrap();
+                    let upload = unsafe {
+                        (upload_data.as_ptr() as *const FFUpload).as_ref().unwrap()
+                    };
+                    let dev = inputs_by_id.get(&upload.id);
+                    if dev.is_none() {
+                        continue;
+                    }
+                    if let Some(mut ff_up) = ff_uploads.remove(&upload.request_id) {
+                        ff_up.effect = upload.effect;
+                        dev.unwrap().ff_upload_end(&ff_up).unwrap();
+                    }
+                },
+                FF_ERASE => {
+                    let mut erase_resp_data = [0u8; mem::size_of::<FFErase>()];
+                    sock.read_exact(&mut erase_resp_data).unwrap();
+                    let erase = unsafe {
+                        (erase_resp_data.as_ptr() as *const FFErase).as_ref().unwrap()
+                    };
+                    let dev = inputs_by_id.get(&erase.id);
+                    if dev.is_none() {
+                        continue;
+                    }
+                    if let Some(ff_ers) = ff_erases.remove(&erase.request_id) {
+                        dev.unwrap().ff_erase_end(&ff_ers).unwrap();
+                    }
                 }
                 m => panic!("Unknown message {}", m)
             }
@@ -175,9 +233,44 @@ fn main() {
                 if count == 0 {
                     break;
                 }
-                let mut ev = InputEvent::new(*id, evts[0].into());
-                struct_to_socket(&mut sock, &mut MessageType::InputEvent).unwrap();
-                struct_to_socket(&mut sock, &mut ev).unwrap();
+                if evts[0].type_ == EventKind::UInput as u16 {
+                    if evts[0].code == UInputKind::ForceFeedbackUpload as u16 {
+                        let mut upload = uinput_ff_upload {
+                            request_id: evts[0].value as u32,
+                            retval: 0,
+                            effect: ff_effect_empty(),
+                            old: ff_effect_empty()
+                        };
+                        uinput.ff_upload_begin(&mut upload).unwrap();
+                        struct_to_socket(&mut sock, &MessageType::FFUpload).unwrap();
+                        struct_to_socket(&mut sock, &FFUpload {
+                            id: *id,
+                            request_id: upload.request_id,
+                            effect: upload.effect
+                        }).unwrap();
+                        ff_uploads.insert(upload.request_id, upload);
+                    } else if evts[0].code == UInputKind::ForceFeedbackErase as u16 {
+                        let mut erase = uinput_ff_erase {
+                            request_id: evts[0].value as u32,
+                            retval: 0,
+                            effect_id: 0,
+                        };
+                        uinput.ff_erase_begin(&mut erase).unwrap();
+                        struct_to_socket(&mut sock, &MessageType::FFErase).unwrap();
+                        struct_to_socket(&mut sock, &FFErase {
+                            id: *id,
+                            request_id: erase.request_id,
+                            effect_id: erase.effect_id
+                        }).unwrap();
+                        ff_erases.insert(erase.request_id, erase);
+                    } else {
+                        eprintln!("Ignoring unknown uinput event: {:?}", evts[0]);
+                    }
+                } else {
+                    let ev = InputEvent::new(*id, evts[0]);
+                    struct_to_socket(&mut sock, &MessageType::InputEvent).unwrap();
+                    struct_to_socket(&mut sock, &ev).unwrap();
+                }
             }
         }
     }
