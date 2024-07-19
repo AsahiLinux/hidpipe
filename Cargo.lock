@@ -19,12 +19,6 @@ checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
 name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
-
-[[package]]
-name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
@@ -55,7 +49,7 @@ dependencies = [
  "input-linux",
  "input-linux-sys",
  "libc",
- "nix 0.29.0",
+ "nix",
  "posix-acl",
 ]
 
@@ -67,7 +61,7 @@ dependencies = [
  "input-linux",
  "input-linux-sys",
  "libc",
- "nix 0.29.0",
+ "nix",
  "udev",
 ]
 
@@ -81,19 +75,21 @@ dependencies = [
 [[package]]
 name = "input-linux"
 version = "0.7.0"
-source = "git+https://github.com/WhatAmISupposedToPutHere/input-linux-rs#ef1d6fc7d2da55669d18efe5ee22aa066e4a1fb9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db86afb5a9a36378e7d3bc0ea335c00ac218be8b2e437bcca7405cb9f8a37426"
 dependencies = [
  "input-linux-sys",
- "nix 0.26.4",
+ "nix",
 ]
 
 [[package]]
 name = "input-linux-sys"
 version = "0.9.0"
-source = "git+https://github.com/WhatAmISupposedToPutHere/input-linux-sys-rs#ca9915bb2cb8c712b9caa5e4d49be414cf576083"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b91b2248b0eaf0a576ef5e60b7f2107a749e705a876bc0b9fe952ac8d83a724"
 dependencies = [
  "libc",
- "nix 0.26.4",
+ "nix",
 ]
 
 [[package]]
@@ -125,15 +121,6 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
-name = "memoffset"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
@@ -143,35 +130,16 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
-dependencies = [
- "bitflags 1.3.2",
- "cfg-if",
- "libc",
- "memoffset 0.7.1",
- "pin-utils",
-]
-
-[[package]]
-name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
- "bitflags 2.6.0",
+ "bitflags",
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset 0.9.1",
+ "memoffset",
 ]
-
-[[package]]
-name = "pin-utils"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkg-config"

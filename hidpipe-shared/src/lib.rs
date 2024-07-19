@@ -1,4 +1,3 @@
-use std::ffi::c_char;
 use std::{slice, mem};
 use std::io::{Result, Write};
 use std::os::unix::net::UnixStream;
@@ -62,7 +61,7 @@ pub struct AddDevice {
     pub ffbits: <ForceFeedbackKind as BitmaskTrait>::Array,
     pub input_id: InputId,
     pub ff_effects: u32,
-    pub name: [c_char; 80],
+    pub name: [u8; 80],
 }
 
 #[repr(C)]

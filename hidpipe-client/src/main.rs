@@ -24,6 +24,7 @@ use hidpipe_shared::{
     empty_input_event, struct_to_socket, FFUpload, FFErase
 };
 use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
+use libc::{c_char, O_NONBLOCK};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
 const REMOVE_DEVICE: u32 = MessageType::RemoveDevice as u32;
@@ -45,7 +46,7 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
         (add_dev_data.as_ptr() as *const AddDevice).as_ref().unwrap()
     };
     let uinput = UInputHandle::new(
-        File::options().read(true).write(true).custom_flags(libc::O_NONBLOCK).open("/dev/uinput").unwrap()
+        File::options().read(true).write(true).custom_flags(O_NONBLOCK).open("/dev/uinput").unwrap()
     );
     for evbit in bitmask_from_slice::<EventKind, _>(&add_dev.evbits).iter() {
         uinput.set_evbit(evbit).unwrap();
@@ -100,7 +101,7 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
             product: add_dev.input_id.product,
             version: add_dev.input_id.version,
         },
-        name: add_dev.name,
+        name: add_dev.name.map(|c| c as c_char),
         ff_effects_max: add_dev.ff_effects,
     }).unwrap();
     uinput.dev_create().unwrap();
