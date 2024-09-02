@@ -1,0 +1,12 @@
+[Unit]
+Description=hidpipe passes through hid devices to vms
+Requires=hidpipe.socket
+After=hidpipe.socket
+
+[Service]
+ExecStart=/usr/bin/hidpipe-server
+
+[Install]
+WantedBy=default.target
+
+

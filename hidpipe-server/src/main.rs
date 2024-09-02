@@ -3,7 +3,7 @@ use std::{fs::{self, File}, mem, env};
 use std::collections::hash_map;
 use std::ffi::OsStr;
 use std::io::{Read, Result};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::fs::OpenOptionsExt;
 use std::net::Shutdown;
@@ -260,7 +260,13 @@ fn main() {
     }
     let sock_path = format!("{}/hidpipe", xdg_dir.unwrap());
     _ = fs::remove_file(&sock_path);
-    let listen_sock = UnixListener::bind(sock_path).unwrap();
+    let listen_sock = if env::var("$LISTEN_FDS").map(|x| x.parse::<u32>().unwrap() > 1).unwrap_or_default() {
+        unsafe {
+            UnixListener::from_raw_fd(3)
+        }
+    } else {
+        UnixListener::bind(sock_path).unwrap()
+    };
     epoll.add(&listen_sock, EpollEvent::new(EpollFlags::EPOLLIN, listen_sock.as_raw_fd() as u64)).unwrap();
     let mut seen_effect = HashSet::new();
 

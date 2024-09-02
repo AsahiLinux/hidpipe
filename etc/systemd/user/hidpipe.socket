@@ -1,0 +1,9 @@
+[Unit]
+Description=hidpipe daemon socket
+
+[Socket]
+ListenStream=%t/hidpipe
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target
