@@ -7,7 +7,7 @@ description = { workspace = true }
 
 [dependencies]
 udev = "0.8"
-hidpipe-shared = { path = "../hidpipe-shared" }
+hidpipe-shared = "0.1.0"
 input-linux = { workspace = true }
 input-linux-sys = { workspace = true }
 nix = { workspace = true }
