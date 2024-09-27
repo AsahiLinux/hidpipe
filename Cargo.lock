@@ -45,7 +45,7 @@ checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 name = "hidpipe-client"
 version = "0.1.0"
 dependencies = [
- "hidpipe-shared",
+ "hidpipe-shared 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "input-linux",
  "input-linux-sys",
  "libc",
@@ -57,7 +57,7 @@ dependencies = [
 name = "hidpipe-server"
 version = "0.1.0"
 dependencies = [
- "hidpipe-shared",
+ "hidpipe-shared 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "input-linux",
  "input-linux-sys",
  "libc",
@@ -68,6 +68,15 @@ dependencies = [
 [[package]]
 name = "hidpipe-shared"
 version = "0.1.0"
+dependencies = [
+ "input-linux",
+]
+
+[[package]]
+name = "hidpipe-shared"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5efa8496e8c09ff3181ff7e55fd481cd1e82b97b2884157ada7e172cc67c6066"
 dependencies = [
  "input-linux",
 ]

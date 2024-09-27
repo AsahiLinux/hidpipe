@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::{fs::{self, File}, mem, env};
 use std::collections::hash_map;
 use std::ffi::OsStr;
-use std::io::{Read, Result};
+use std::io::{ErrorKind, Read, Result};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::fs::OpenOptionsExt;
@@ -18,6 +18,8 @@ use hidpipe_shared::{
     AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello,
     InputEvent, empty_input_event, struct_to_socket, FFUpload, FFErase
 };
+use nix::unistd::{getresuid, seteuid};
+
 fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
     let props = evdev.device_properties()?;
     let no = Ok(false);
@@ -238,6 +240,9 @@ fn hangup_on_error<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64
 }
 
 fn main() {
+    if getresuid().unwrap().real.is_root() {
+        eprintln!("You are trying to run hidpipe as root. Unless your entire desktop session runs as root, this is most likely not what you want.")
+    }
     let udev_socket = MonitorBuilder::new().unwrap()
         .match_subsystem("input").unwrap()
         .listen().unwrap();
@@ -246,10 +251,16 @@ fn main() {
     let epoll = Epoll::new(EpollCreateFlags::empty()).unwrap();
     for dir_ent in fs::read_dir("/dev/input/").unwrap() {
         let dir_ent = dir_ent.unwrap();
+        if dir_ent.file_type().unwrap().is_dir() {
+            continue;
+        }
         let name = dir_ent.file_name();
         let res = evdevs.check_and_add(&name, dir_ent.path().as_os_str(), &epoll);
-        if let Err(e) = res {
-            eprintln!("Unable to determine if {} is a joystick, error: {:?}", name.to_string_lossy(), e);
+        match res {
+            Ok(Some(_)) => eprintln!("{} is a joystick", name.to_string_lossy()),
+            Ok(None) => eprintln!("{} is not a joystick", name.to_string_lossy()),
+            Err(e) if e.kind() == ErrorKind::PermissionDenied => eprintln!("Unable to access {}, this is most likely fine", name.to_string_lossy()),
+            Err(e) => eprintln!("Unable to determine if {} is a joystick, error: {:?}", name.to_string_lossy(), e),
         }
     }
     epoll.add(&udev_socket, EpollEvent::new(EpollFlags::EPOLLIN, udev_socket.as_raw_fd() as u64)).unwrap();
