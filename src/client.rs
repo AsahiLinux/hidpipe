@@ -15,13 +15,12 @@ use libc::{c_char, O_NONBLOCK};
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 use nix::sys::socket::{connect, socket, AddressFamily, SockFlag, SockType, VsockAddr};
-use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{chown, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
 use std::{mem, slice};
 
@@ -120,9 +119,7 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
         })
         .unwrap();
     uinput.dev_create().unwrap();
-    let mut acl = PosixACL::read_acl(uinput.evdev_path().unwrap()).unwrap();
-    acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
-    acl.write_acl(uinput.evdev_path().unwrap()).unwrap();
+    chown(uinput.evdev_path().unwrap(), Some(user_id), Some(0)).unwrap();
     (add_dev.id, uinput)
 }
 
