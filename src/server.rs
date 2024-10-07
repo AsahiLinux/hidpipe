@@ -14,7 +14,7 @@ use input_linux::{
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 
-use hidpipe_shared::{
+use hidpipe::{
     AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello,
     InputEvent, empty_input_event, struct_to_socket, FFUpload, FFErase
 };
