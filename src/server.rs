@@ -18,7 +18,7 @@ use hidpipe::{
     AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello,
     InputEvent, empty_input_event, struct_to_socket, FFUpload, FFErase
 };
-use nix::unistd::{getresuid, seteuid};
+use nix::unistd::getresuid;
 
 fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
     let props = evdev.device_properties()?;
