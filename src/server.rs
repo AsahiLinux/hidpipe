@@ -1,33 +1,36 @@
-use std::collections::{HashMap, HashSet};
-use std::{fs::{self, File}, mem, env};
-use std::collections::hash_map;
-use std::ffi::OsStr;
-use std::io::{ErrorKind, Read, Result};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::os::unix::fs::OpenOptionsExt;
-use std::net::Shutdown;
-use udev::{EventType, MonitorBuilder};
-use input_linux::{
-    evdev::EvdevHandle, InputProperty, EventKind, AbsoluteAxis, Key, MiscKind
-};
+use input_linux::{evdev::EvdevHandle, AbsoluteAxis, EventKind, InputProperty, Key, MiscKind};
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
+use std::collections::hash_map;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
+use std::io::{ErrorKind, Read, Result};
+use std::net::Shutdown;
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::{
+    env,
+    fs::{self, File},
+    mem,
+};
+use udev::{EventType, MonitorBuilder};
 
 use hidpipe::{
-    AddDevice, MessageType, RemoveDevice, ClientHello, ServerHello,
-    InputEvent, empty_input_event, struct_to_socket, FFUpload, FFErase
+    empty_input_event, struct_to_socket, AddDevice, ClientHello, FFErase, FFUpload, InputEvent,
+    MessageType, RemoveDevice, ServerHello,
 };
 use nix::unistd::getresuid;
 
 fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
     let props = evdev.device_properties()?;
     let no = Ok(false);
-    if props.get(InputProperty::Accelerometer) ||
-        props.get(InputProperty::PointingStick) ||
-        props.get(InputProperty::TopButtonPad) ||
-        props.get(InputProperty::ButtonPad) ||
-        props.get(InputProperty::SemiMultiTouch) {
+    if props.get(InputProperty::Accelerometer)
+        || props.get(InputProperty::PointingStick)
+        || props.get(InputProperty::TopButtonPad)
+        || props.get(InputProperty::ButtonPad)
+        || props.get(InputProperty::SemiMultiTouch)
+    {
         return no;
     }
     let events = evdev.event_bits()?;
@@ -39,17 +42,16 @@ fn is_joystick<F: AsRawFd>(evdev: &EvdevHandle<F>) -> Result<bool> {
         return no;
     }
     let keys = evdev.key_mask()?;
-    Ok(keys.get(Key::ButtonTrigger) ||
-              keys.get(Key::ButtonSouth) ||
-              keys.get(Key::Button1) ||
-              axes.get(AbsoluteAxis::RX) ||
-              axes.get(AbsoluteAxis::RY) ||
-              axes.get(AbsoluteAxis::Throttle) ||
-              axes.get(AbsoluteAxis::Rudder) ||
-              axes.get(AbsoluteAxis::Wheel) ||
-              axes.get(AbsoluteAxis::Gas) ||
-              axes.get(AbsoluteAxis::Brake)
-    )
+    Ok(keys.get(Key::ButtonTrigger)
+        || keys.get(Key::ButtonSouth)
+        || keys.get(Key::Button1)
+        || axes.get(AbsoluteAxis::RX)
+        || axes.get(AbsoluteAxis::RY)
+        || axes.get(AbsoluteAxis::Throttle)
+        || axes.get(AbsoluteAxis::Rudder)
+        || axes.get(AbsoluteAxis::Wheel)
+        || axes.get(AbsoluteAxis::Gas)
+        || axes.get(AbsoluteAxis::Brake))
 }
 
 fn send_add_device<F: AsRawFd>(evdev: &EvdevHandle<F>, client: &mut Client) -> Result<()> {
@@ -72,9 +74,21 @@ fn send_add_device<F: AsRawFd>(evdev: &EvdevHandle<F>, client: &mut Client) -> R
     let mut name = [0; 80];
     evdev.device_name_buf(&mut name)?;
     client.write(&MessageType::AddDevice)?;
-    client.write(&AddDevice{
-        evbits, keybits, relbits, absbits, mscbits, ledbits, id,
-        sndbits, swbits, propbits, input_id, name, ff_effects, ffbits
+    client.write(&AddDevice {
+        evbits,
+        keybits,
+        relbits,
+        absbits,
+        mscbits,
+        ledbits,
+        id,
+        sndbits,
+        swbits,
+        propbits,
+        input_id,
+        name,
+        ff_effects,
+        ffbits,
     })?;
     for bit in abs.iter() {
         let info = evdev.absolute_info(bit)?;
@@ -85,7 +99,7 @@ fn send_add_device<F: AsRawFd>(evdev: &EvdevHandle<F>, client: &mut Client) -> R
 
 struct EvdevContainer {
     fds_to_devs: HashMap<u64, EvdevHandle<File>>,
-    names_to_fds: HashMap<String, u64>
+    names_to_fds: HashMap<String, u64>,
 }
 
 fn insert_entry<K, V>(entry: hash_map::Entry<K, V>, v: V) -> &V {
@@ -102,27 +116,41 @@ impl EvdevContainer {
     fn new() -> EvdevContainer {
         EvdevContainer {
             fds_to_devs: HashMap::new(),
-            names_to_fds: HashMap::new()
+            names_to_fds: HashMap::new(),
         }
     }
-    fn check_and_add(&mut self, dev_name: &OsStr, file_name: &OsStr, epoll: &Epoll) -> Result<Option<&EvdevHandle<File>>> {
+    fn check_and_add(
+        &mut self,
+        dev_name: &OsStr,
+        file_name: &OsStr,
+        epoll: &Epoll,
+    ) -> Result<Option<&EvdevHandle<File>>> {
         let dev_name = dev_name.to_string_lossy();
         if !dev_name.starts_with("event") {
             return Ok(None);
         }
-        let file = File::options().read(true).write(true).custom_flags(libc::O_NONBLOCK).open(file_name)?;
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(file_name)?;
         let evdev = EvdevHandle::new(file);
         if is_joystick(&evdev)? {
             let raw = evdev.as_raw_fd() as u64;
             self.names_to_fds.insert(dev_name.into_owned(), raw);
-            epoll.add(evdev.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw)).unwrap();
+            epoll
+                .add(evdev.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw))
+                .unwrap();
             Ok(Some(insert_entry(self.fds_to_devs.entry(raw), evdev)))
         } else {
             Ok(None)
         }
     }
     fn remove(&mut self, dev_name: &OsStr, epoll: &Epoll) -> Option<u64> {
-        if let Some(id) = self.names_to_fds.remove(dev_name.to_string_lossy().as_ref()) {
+        if let Some(id) = self
+            .names_to_fds
+            .remove(dev_name.to_string_lossy().as_ref())
+        {
             let evdev = self.fds_to_devs.remove(&id).unwrap();
             epoll.delete(evdev.as_inner()).unwrap();
             Some(id)
@@ -133,7 +161,7 @@ impl EvdevContainer {
     fn get(&self, id: u64) -> Option<&EvdevHandle<File>> {
         self.fds_to_devs.get(&id)
     }
-    fn iter(&self) -> impl Iterator<Item=&EvdevHandle<File>> {
+    fn iter(&self) -> impl Iterator<Item = &EvdevHandle<File>> {
         self.fds_to_devs.values()
     }
 }
@@ -144,20 +172,20 @@ enum WaitingFor {
     Header,
     InputEvent,
     FFUpload,
-    FFErase
+    FFErase,
 }
 
 struct Client {
     socket: UnixStream,
     buf: Vec<u8>,
     filled: usize,
-    waiting_for: WaitingFor
+    waiting_for: WaitingFor,
 }
 
 enum ReadReply {
     Data(Vec<u8>),
     NotReady,
-    Hangup
+    Hangup,
 }
 
 impl Client {
@@ -166,7 +194,7 @@ impl Client {
             socket,
             waiting_for: WaitingFor::Hello,
             buf: Vec::new(),
-            filled: 0
+            filled: 0,
         }
     }
     fn read(&mut self, size: usize) -> Result<ReadReply> {
@@ -194,7 +222,12 @@ impl Client {
     }
 }
 
-fn recv_from_client(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64, size: usize) -> Option<Vec<u8>> {
+fn recv_from_client(
+    clients: &mut HashMap<u64, Client>,
+    epoll: &Epoll,
+    fd: u64,
+    size: usize,
+) -> Option<Vec<u8>> {
     let client = clients.get_mut(&fd).unwrap();
     match client.read(size) {
         Ok(ReadReply::NotReady) => None,
@@ -203,7 +236,7 @@ fn recv_from_client(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64, 
             epoll.delete(&client.socket).unwrap();
             clients.remove(&fd);
             None
-        },
+        }
         Err(e) => {
             eprintln!("Client {} disconnected with error: {:?}", fd, e);
             epoll.delete(&client.socket).unwrap();
@@ -213,14 +246,21 @@ fn recv_from_client(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64, 
     }
 }
 
-fn hangup_on_error_bcast<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, mut f: F) where F: FnMut(&mut Client) -> Result<()> {
+fn hangup_on_error_bcast<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, mut f: F)
+where
+    F: FnMut(&mut Client) -> Result<()>,
+{
     clients.retain(|k, v| {
         if v.waiting_for == WaitingFor::Hello {
             return true;
         }
         let res = f(v);
         if res.is_err() {
-            eprintln!("Client {} disconnected with error: {:?}", *k, res.unwrap_err());
+            eprintln!(
+                "Client {} disconnected with error: {:?}",
+                *k,
+                res.unwrap_err()
+            );
             epoll.delete(&v.socket).unwrap();
             false
         } else {
@@ -229,11 +269,18 @@ fn hangup_on_error_bcast<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, m
     });
 }
 
-fn hangup_on_error<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64, f: F) where F: FnOnce(&mut Client) -> Result<()> {
+fn hangup_on_error<F>(clients: &mut HashMap<u64, Client>, epoll: &Epoll, fd: u64, f: F)
+where
+    F: FnOnce(&mut Client) -> Result<()>,
+{
     let client = clients.get_mut(&fd).unwrap();
     let res = f(client);
     if res.is_err() {
-        eprintln!("Client {} disconnected with error: {:?}", fd, res.unwrap_err());
+        eprintln!(
+            "Client {} disconnected with error: {:?}",
+            fd,
+            res.unwrap_err()
+        );
         epoll.delete(&client.socket).unwrap();
         clients.remove(&fd);
     }
@@ -243,9 +290,12 @@ fn main() {
     if getresuid().unwrap().real.is_root() {
         eprintln!("You are trying to run hidpipe as root. Unless your entire desktop session runs as root, this is most likely not what you want.")
     }
-    let udev_socket = MonitorBuilder::new().unwrap()
-        .match_subsystem("input").unwrap()
-        .listen().unwrap();
+    let udev_socket = MonitorBuilder::new()
+        .unwrap()
+        .match_subsystem("input")
+        .unwrap()
+        .listen()
+        .unwrap();
     let mut evdevs = EvdevContainer::new();
     let mut clients = HashMap::new();
     let epoll = Epoll::new(EpollCreateFlags::empty()).unwrap();
@@ -259,26 +309,47 @@ fn main() {
         match res {
             Ok(Some(_)) => eprintln!("{} is a joystick", name.to_string_lossy()),
             Ok(None) => eprintln!("{} is not a joystick", name.to_string_lossy()),
-            Err(e) if e.kind() == ErrorKind::PermissionDenied => eprintln!("Unable to access {}, this is most likely fine", name.to_string_lossy()),
-            Err(e) => eprintln!("Unable to determine if {} is a joystick, error: {:?}", name.to_string_lossy(), e),
+            Err(e) if e.kind() == ErrorKind::PermissionDenied => eprintln!(
+                "Unable to access {}, this is most likely fine",
+                name.to_string_lossy()
+            ),
+            Err(e) => eprintln!(
+                "Unable to determine if {} is a joystick, error: {:?}",
+                name.to_string_lossy(),
+                e
+            ),
         }
     }
-    epoll.add(&udev_socket, EpollEvent::new(EpollFlags::EPOLLIN, udev_socket.as_raw_fd() as u64)).unwrap();
+    epoll
+        .add(
+            &udev_socket,
+            EpollEvent::new(EpollFlags::EPOLLIN, udev_socket.as_raw_fd() as u64),
+        )
+        .unwrap();
     let xdg_dir = env::var("XDG_RUNTIME_DIR");
     if xdg_dir.is_err() {
-        eprintln!("Unable to get XDG_RUNTIME_DIR, error: {:?}", xdg_dir.unwrap_err());
+        eprintln!(
+            "Unable to get XDG_RUNTIME_DIR, error: {:?}",
+            xdg_dir.unwrap_err()
+        );
         return;
     }
     let sock_path = format!("{}/hidpipe", xdg_dir.unwrap());
     _ = fs::remove_file(&sock_path);
-    let listen_sock = if env::var("$LISTEN_FDS").map(|x| x.parse::<u32>().unwrap() > 1).unwrap_or_default() {
-        unsafe {
-            UnixListener::from_raw_fd(3)
-        }
+    let listen_sock = if env::var("$LISTEN_FDS")
+        .map(|x| x.parse::<u32>().unwrap() > 1)
+        .unwrap_or_default()
+    {
+        unsafe { UnixListener::from_raw_fd(3) }
     } else {
         UnixListener::bind(sock_path).unwrap()
     };
-    epoll.add(&listen_sock, EpollEvent::new(EpollFlags::EPOLLIN, listen_sock.as_raw_fd() as u64)).unwrap();
+    epoll
+        .add(
+            &listen_sock,
+            EpollEvent::new(EpollFlags::EPOLLIN, listen_sock.as_raw_fd() as u64),
+        )
+        .unwrap();
     let mut seen_effect = HashSet::new();
 
     loop {
@@ -286,11 +357,11 @@ fn main() {
         match epoll.wait(&mut evts, EpollTimeout::NONE) {
             Err(Errno::EINTR) | Ok(0) => {
                 continue;
-            },
-            Ok(_) => {},
+            }
+            Ok(_) => {}
             e => {
                 e.unwrap();
-            },
+            }
         }
         let fd = evts[0].data();
         if fd == udev_socket.as_raw_fd() as u64 {
@@ -300,10 +371,10 @@ fn main() {
                         if let Some(id) = evdevs.remove(event.sysname(), &epoll) {
                             hangup_on_error_bcast(&mut clients, &epoll, |client| {
                                 client.write(&MessageType::RemoveDevice)?;
-                                client.write(&RemoveDevice{id})
+                                client.write(&RemoveDevice { id })
                             });
                         }
-                    },
+                    }
                     EventType::Add => {
                         let name = event.sysname();
                         let node = event.devnode();
@@ -313,42 +384,49 @@ fn main() {
                         let res = evdevs.check_and_add(name, node.unwrap().as_os_str(), &epoll);
                         match res {
                             Err(e) => {
-                                eprintln!("Unable to determine if {} is a joystick, error: {:?}", name.to_string_lossy(), e);
-                            },
-                            Ok(None) => {},
+                                eprintln!(
+                                    "Unable to determine if {} is a joystick, error: {:?}",
+                                    name.to_string_lossy(),
+                                    e
+                                );
+                            }
+                            Ok(None) => {}
                             Ok(Some(dev)) => {
                                 hangup_on_error_bcast(&mut clients, &epoll, |client| {
                                     send_add_device(dev, client)
                                 });
                             }
                         }
-                    },
-                    _ => {
                     }
+                    _ => {}
                 }
             }
         } else if fd == listen_sock.as_raw_fd() as u64 {
             let res = listen_sock.accept();
             if res.is_err() {
-                eprintln!("Failed to accept a connection, error: {:?}", res.unwrap_err());
+                eprintln!(
+                    "Failed to accept a connection, error: {:?}",
+                    res.unwrap_err()
+                );
                 continue;
             }
             let stream = res.unwrap().0;
             stream.set_nonblocking(true).unwrap();
             let raw = stream.as_raw_fd() as u64;
-            epoll.add(&stream, EpollEvent::new(EpollFlags::EPOLLIN, raw)).unwrap();
+            epoll
+                .add(&stream, EpollEvent::new(EpollFlags::EPOLLIN, raw))
+                .unwrap();
             let client = Client::new(stream);
             clients.insert(raw, client);
         } else if let Some(client) = clients.get(&fd) {
             if client.waiting_for == WaitingFor::Hello {
-                let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<ClientHello>());
+                let data =
+                    recv_from_client(&mut clients, &epoll, fd, mem::size_of::<ClientHello>());
                 if data.is_none() {
-                    continue
+                    continue;
                 }
                 hangup_on_error(&mut clients, &epoll, fd, |client| {
-                    client.write(&ServerHello {
-                        version: 0
-                    })?;
+                    client.write(&ServerHello { version: 0 })?;
                     for dev in evdevs.iter() {
                         send_add_device(dev, client)?;
                     }
@@ -356,9 +434,10 @@ fn main() {
                     Ok(())
                 });
             } else if client.waiting_for == WaitingFor::Header {
-                let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<MessageType>());
+                let data =
+                    recv_from_client(&mut clients, &epoll, fd, mem::size_of::<MessageType>());
                 if data.is_none() {
-                    continue
+                    continue;
                 }
                 let data = data.unwrap();
                 let msg_type = u32::from_ne_bytes(data.try_into().unwrap());
@@ -377,12 +456,10 @@ fn main() {
             } else if client.waiting_for == WaitingFor::InputEvent {
                 let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<InputEvent>());
                 if data.is_none() {
-                    continue
+                    continue;
                 }
                 let data = data.unwrap();
-                let event = unsafe {
-                    (data.as_ptr() as *const InputEvent).as_ref().unwrap()
-                };
+                let event = unsafe { (data.as_ptr() as *const InputEvent).as_ref().unwrap() };
                 let evdev = evdevs.get(event.id);
                 if evdev.is_none() {
                     eprintln!("Client {} sent input to unknown device {}", fd, event.id);
@@ -393,12 +470,10 @@ fn main() {
             } else if client.waiting_for == WaitingFor::FFUpload {
                 let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<FFUpload>());
                 if data.is_none() {
-                    continue
+                    continue;
                 }
                 let mut data = data.unwrap();
-                let upload = unsafe {
-                    (data.as_mut_ptr() as *mut FFUpload).as_mut().unwrap()
-                };
+                let upload = unsafe { (data.as_mut_ptr() as *mut FFUpload).as_mut().unwrap() };
                 let evdev = evdevs.get(upload.id);
                 if evdev.is_none() {
                     eprintln!("Client {} sent input to unknown device {}", fd, upload.id);
@@ -407,7 +482,10 @@ fn main() {
                 if seen_effect.insert((upload.id, upload.effect.id)) {
                     upload.effect.id = -1;
                 }
-                evdev.unwrap().send_force_feedback(&mut upload.effect).unwrap();
+                evdev
+                    .unwrap()
+                    .send_force_feedback(&mut upload.effect)
+                    .unwrap();
                 hangup_on_error(&mut clients, &epoll, fd, |client| {
                     client.waiting_for = WaitingFor::Header;
                     client.write(&MessageType::FFUpload)?;
@@ -416,12 +494,10 @@ fn main() {
             } else if client.waiting_for == WaitingFor::FFErase {
                 let data = recv_from_client(&mut clients, &epoll, fd, mem::size_of::<FFErase>());
                 if data.is_none() {
-                    continue
+                    continue;
                 }
                 let mut data = data.unwrap();
-                let erase = unsafe {
-                    (data.as_mut_ptr() as *const FFErase).as_ref().unwrap()
-                };
+                let erase = unsafe { (data.as_mut_ptr() as *const FFErase).as_ref().unwrap() };
                 let evdev = evdevs.get(erase.id);
                 if evdev.is_none() {
                     eprintln!("Client {} sent input to unknown device {}", fd, erase.id);

@@ -1,30 +1,29 @@
-use std::env;
-use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
-use std::os::unix::fs::OpenOptionsExt;
-use std::{mem, slice};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Write};
-use input_linux::{
-    AbsoluteAxis, AbsoluteInfo, Bitmask, EventKind, InputProperty, Key,
-    LedKind, MiscKind, RelativeAxis, SoundKind, SwitchKind, UInputHandle,
-    ForceFeedbackKind, UInputKind
+use hidpipe::{
+    empty_input_event, struct_to_socket, AddDevice, ClientHello, FFErase, FFUpload, InputEvent,
+    MessageType, RemoveDevice, ServerHello,
 };
 use input_linux::bitmask::BitmaskTrait;
+use input_linux::{
+    AbsoluteAxis, AbsoluteInfo, Bitmask, EventKind, ForceFeedbackKind, InputProperty, Key, LedKind,
+    MiscKind, RelativeAxis, SoundKind, SwitchKind, UInputHandle, UInputKind,
+};
 use input_linux_sys::{
-    uinput_setup, input_id, uinput_abs_setup, input_absinfo, ff_effect,
-    ff_trigger, ff_replay, uinput_ff_upload, uinput_ff_erase
+    ff_effect, ff_replay, ff_trigger, input_absinfo, input_id, uinput_abs_setup, uinput_ff_erase,
+    uinput_ff_upload, uinput_setup,
 };
-use nix::errno::Errno;
-use nix::sys::socket::{AddressFamily, connect, socket, SockFlag, SockType, VsockAddr};
-use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
-use hidpipe::{
-    AddDevice, ClientHello, MessageType, RemoveDevice, ServerHello, InputEvent,
-    empty_input_event, struct_to_socket, FFUpload, FFErase
-};
-use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 use libc::{c_char, O_NONBLOCK};
+use nix::errno::Errno;
+use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
+use nix::sys::socket::{connect, socket, AddressFamily, SockFlag, SockType, VsockAddr};
+use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
+use std::collections::HashMap;
+use std::env;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::net::UnixStream;
+use std::{mem, slice};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
 const REMOVE_DEVICE: u32 = MessageType::RemoveDevice as u32;
@@ -32,8 +31,11 @@ const INPUT_EVENT: u32 = MessageType::InputEvent as u32;
 const FF_UPLOAD: u32 = MessageType::FFUpload as u32;
 const FF_ERASE: u32 = MessageType::FFErase as u32;
 
-fn bitmask_from_slice<T, A>(s: &T::Array) -> Bitmask<T> where
-    A: AsRef<[u8]>, T: BitmaskTrait<Array = A> {
+fn bitmask_from_slice<T, A>(s: &T::Array) -> Bitmask<T>
+where
+    A: AsRef<[u8]>,
+    T: BitmaskTrait<Array = A>,
+{
     let mut bm = Bitmask::<T>::default();
     bm.copy_from_slice(s.as_ref());
     bm
@@ -43,10 +45,17 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
     let mut add_dev_data = [0u8; mem::size_of::<AddDevice>()];
     sock.read_exact(&mut add_dev_data).unwrap();
     let add_dev = unsafe {
-        (add_dev_data.as_ptr() as *const AddDevice).as_ref().unwrap()
+        (add_dev_data.as_ptr() as *const AddDevice)
+            .as_ref()
+            .unwrap()
     };
     let uinput = UInputHandle::new(
-        File::options().read(true).write(true).custom_flags(O_NONBLOCK).open("/dev/uinput").unwrap()
+        File::options()
+            .read(true)
+            .write(true)
+            .custom_flags(O_NONBLOCK)
+            .open("/dev/uinput")
+            .unwrap(),
     );
     for evbit in bitmask_from_slice::<EventKind, _>(&add_dev.evbits).iter() {
         uinput.set_evbit(evbit).unwrap();
@@ -62,19 +71,23 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
         let mut absinfo_data = [0u8; mem::size_of::<AbsoluteInfo>()];
         sock.read_exact(&mut absinfo_data).unwrap();
         let abs_info = unsafe {
-            (absinfo_data.as_ptr() as *const AbsoluteInfo).as_ref().unwrap()
+            (absinfo_data.as_ptr() as *const AbsoluteInfo)
+                .as_ref()
+                .unwrap()
         };
-        uinput.abs_setup(&uinput_abs_setup {
-            code: absbit as u16,
-            absinfo: input_absinfo {
-                value: abs_info.value,
-                minimum: abs_info.minimum,
-                maximum: abs_info.maximum,
-                fuzz: abs_info.fuzz,
-                flat: abs_info.flat,
-                resolution: abs_info.resolution,
-            },
-        }).unwrap();
+        uinput
+            .abs_setup(&uinput_abs_setup {
+                code: absbit as u16,
+                absinfo: input_absinfo {
+                    value: abs_info.value,
+                    minimum: abs_info.minimum,
+                    maximum: abs_info.maximum,
+                    fuzz: abs_info.fuzz,
+                    flat: abs_info.flat,
+                    resolution: abs_info.resolution,
+                },
+            })
+            .unwrap();
     }
     for mscbit in bitmask_from_slice::<MiscKind, _>(&add_dev.mscbits).iter() {
         uinput.set_mscbit(mscbit).unwrap();
@@ -94,16 +107,18 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
     for ffbit in bitmask_from_slice::<ForceFeedbackKind, _>(&add_dev.ffbits).iter() {
         uinput.set_ffbit(ffbit).unwrap();
     }
-    uinput.dev_setup(&uinput_setup {
-        id: input_id {
-            bustype: add_dev.input_id.bustype,
-            vendor: add_dev.input_id.vendor,
-            product: add_dev.input_id.product,
-            version: add_dev.input_id.version,
-        },
-        name: add_dev.name.map(|c| c as c_char),
-        ff_effects_max: add_dev.ff_effects,
-    }).unwrap();
+    uinput
+        .dev_setup(&uinput_setup {
+            id: input_id {
+                bustype: add_dev.input_id.bustype,
+                vendor: add_dev.input_id.vendor,
+                product: add_dev.input_id.product,
+                version: add_dev.input_id.version,
+            },
+            name: add_dev.name.map(|c| c as c_char),
+            ff_effects_max: add_dev.ff_effects,
+        })
+        .unwrap();
     uinput.dev_create().unwrap();
     let mut acl = PosixACL::read_acl(uinput.evdev_path().unwrap()).unwrap();
     acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
@@ -118,32 +133,44 @@ fn ff_effect_empty() -> ff_effect {
         direction: 0,
         trigger: ff_trigger {
             button: 0,
-            interval: 0
+            interval: 0,
         },
         replay: ff_replay {
             length: 0,
-            delay: 0
+            delay: 0,
         },
-        u: [0; 4]
+        u: [0; 4],
     }
 }
 
 fn main() {
     let user_id = env::args().nth(1).unwrap().parse::<u32>().unwrap();
-    let sock_fd = socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None).unwrap();
+    let sock_fd = socket(
+        AddressFamily::Vsock,
+        SockType::Stream,
+        SockFlag::empty(),
+        None,
+    )
+    .unwrap();
     connect(sock_fd.as_raw_fd(), &VsockAddr::new(2, 3334)).unwrap();
     let mut sock = UnixStream::from(sock_fd);
-    let c_hello = ClientHello {
-        version: 0
-    };
+    let c_hello = ClientHello { version: 0 };
     let c_hello_data = unsafe {
-        slice::from_raw_parts(&c_hello as *const ClientHello as *const u8, mem::size_of::<ClientHello>())
+        slice::from_raw_parts(
+            &c_hello as *const ClientHello as *const u8,
+            mem::size_of::<ClientHello>(),
+        )
     };
     sock.write_all(c_hello_data).unwrap();
     let mut s_hello_data = [0u8; mem::size_of::<ServerHello>()];
     sock.read_exact(&mut s_hello_data).unwrap();
     let epoll = Epoll::new(EpollCreateFlags::empty()).unwrap();
-    epoll.add(&sock, EpollEvent::new(EpollFlags::EPOLLIN, sock.as_raw_fd() as u64)).unwrap();
+    epoll
+        .add(
+            &sock,
+            EpollEvent::new(EpollFlags::EPOLLIN, sock.as_raw_fd() as u64),
+        )
+        .unwrap();
     let mut inputs_by_id = HashMap::new();
     let mut fd_to_id = HashMap::new();
     let mut ff_uploads = HashMap::<u32, uinput_ff_upload>::new();
@@ -153,11 +180,11 @@ fn main() {
         match epoll.wait(&mut evts, EpollTimeout::NONE) {
             Err(Errno::EINTR) | Ok(0) => {
                 continue;
-            },
-            Ok(_) => {},
+            }
+            Ok(_) => {}
             e => {
                 e.unwrap();
-            },
+            }
         }
         let fd = evts[0].data();
         if fd == sock.as_raw_fd() as u64 {
@@ -167,15 +194,19 @@ fn main() {
                 ADD_DEVICE => {
                     let (id, uinput) = init_uinput(&mut sock, user_id);
                     let raw = uinput.as_inner().as_raw_fd() as u64;
-                    epoll.add(uinput.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw)).unwrap();
+                    epoll
+                        .add(uinput.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw))
+                        .unwrap();
                     inputs_by_id.insert(id, uinput);
                     fd_to_id.insert(raw, id);
-                },
+                }
                 REMOVE_DEVICE => {
                     let mut remove_dev_data = [0u8; mem::size_of::<RemoveDevice>()];
                     sock.read_exact(&mut remove_dev_data).unwrap();
                     let remove_dev = unsafe {
-                        (remove_dev_data.as_ptr() as *const RemoveDevice).as_ref().unwrap()
+                        (remove_dev_data.as_ptr() as *const RemoveDevice)
+                            .as_ref()
+                            .unwrap()
                     };
                     if let Some(uinput) = inputs_by_id.remove(&remove_dev.id) {
                         let raw = uinput.as_inner().as_raw_fd() as u64;
@@ -183,25 +214,23 @@ fn main() {
                         epoll.delete(uinput.as_inner()).unwrap();
                         uinput.dev_destroy().unwrap();
                     }
-                },
+                }
                 INPUT_EVENT => {
                     let mut event_data = [0u8; mem::size_of::<InputEvent>()];
                     sock.read_exact(&mut event_data).unwrap();
-                    let event = unsafe {
-                        (event_data.as_ptr() as *const InputEvent).as_ref().unwrap()
-                    };
+                    let event =
+                        unsafe { (event_data.as_ptr() as *const InputEvent).as_ref().unwrap() };
                     let dev = inputs_by_id.get(&event.id);
                     if dev.is_none() {
                         continue;
                     }
                     dev.unwrap().write(&[event.to_input_event()]).unwrap();
-                },
+                }
                 FF_UPLOAD => {
                     let mut upload_data = [0u8; mem::size_of::<FFUpload>()];
                     sock.read_exact(&mut upload_data).unwrap();
-                    let upload = unsafe {
-                        (upload_data.as_ptr() as *const FFUpload).as_ref().unwrap()
-                    };
+                    let upload =
+                        unsafe { (upload_data.as_ptr() as *const FFUpload).as_ref().unwrap() };
                     let dev = inputs_by_id.get(&upload.id);
                     if dev.is_none() {
                         continue;
@@ -210,12 +239,14 @@ fn main() {
                         ff_up.effect = upload.effect;
                         dev.unwrap().ff_upload_end(&ff_up).unwrap();
                     }
-                },
+                }
                 FF_ERASE => {
                     let mut erase_resp_data = [0u8; mem::size_of::<FFErase>()];
                     sock.read_exact(&mut erase_resp_data).unwrap();
                     let erase = unsafe {
-                        (erase_resp_data.as_ptr() as *const FFErase).as_ref().unwrap()
+                        (erase_resp_data.as_ptr() as *const FFErase)
+                            .as_ref()
+                            .unwrap()
                     };
                     let dev = inputs_by_id.get(&erase.id);
                     if dev.is_none() {
@@ -225,7 +256,7 @@ fn main() {
                         dev.unwrap().ff_erase_end(&ff_ers).unwrap();
                     }
                 }
-                m => panic!("Unknown message {}", m)
+                m => panic!("Unknown message {}", m),
             }
         } else if let Some(id) = fd_to_id.get(&fd) {
             let uinput = inputs_by_id.get(id).unwrap();
@@ -240,15 +271,19 @@ fn main() {
                             request_id: evts[0].value as u32,
                             retval: 0,
                             effect: ff_effect_empty(),
-                            old: ff_effect_empty()
+                            old: ff_effect_empty(),
                         };
                         uinput.ff_upload_begin(&mut upload).unwrap();
                         struct_to_socket(&mut sock, &MessageType::FFUpload).unwrap();
-                        struct_to_socket(&mut sock, &FFUpload {
-                            id: *id,
-                            request_id: upload.request_id,
-                            effect: upload.effect
-                        }).unwrap();
+                        struct_to_socket(
+                            &mut sock,
+                            &FFUpload {
+                                id: *id,
+                                request_id: upload.request_id,
+                                effect: upload.effect,
+                            },
+                        )
+                        .unwrap();
                         ff_uploads.insert(upload.request_id, upload);
                     } else if evts[0].code == UInputKind::ForceFeedbackErase as u16 {
                         let mut erase = uinput_ff_erase {
@@ -258,11 +293,15 @@ fn main() {
                         };
                         uinput.ff_erase_begin(&mut erase).unwrap();
                         struct_to_socket(&mut sock, &MessageType::FFErase).unwrap();
-                        struct_to_socket(&mut sock, &FFErase {
-                            id: *id,
-                            request_id: erase.request_id,
-                            effect_id: erase.effect_id
-                        }).unwrap();
+                        struct_to_socket(
+                            &mut sock,
+                            &FFErase {
+                                id: *id,
+                                request_id: erase.request_id,
+                                effect_id: erase.effect_id,
+                            },
+                        )
+                        .unwrap();
                         ff_erases.insert(erase.request_id, erase);
                     } else {
                         eprintln!("Ignoring unknown uinput event: {:?}", evts[0]);
