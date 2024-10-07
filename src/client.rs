@@ -15,7 +15,6 @@ use libc::{c_char, O_NONBLOCK};
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 use nix::sys::socket::{connect, socket, AddressFamily, SockFlag, SockType, VsockAddr};
-use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -23,6 +22,7 @@ use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
+use std::process::Command;
 use std::{mem, slice};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
@@ -120,9 +120,15 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
         })
         .unwrap();
     uinput.dev_create().unwrap();
-    let mut acl = PosixACL::read_acl(uinput.evdev_path().unwrap()).unwrap();
-    acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
-    acl.write_acl(uinput.evdev_path().unwrap()).unwrap();
+
+    // Set read+write permissions. The rust stdlib doesn't have bindings for this, but it's
+    // easy to do it via setfacl.
+    let evdev_path = uinput.evdev_path().unwrap();
+    let entry = format!("u:{}:rw", user_id);
+    let args = ["-m", &entry, evdev_path.to_str().unwrap()];
+    let status = Command::new("setfacl").args(args).status().unwrap();
+    assert!(status.success());
+
     (add_dev.id, uinput)
 }
 
