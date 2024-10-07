@@ -15,14 +15,13 @@ use libc::{c_char, O_NONBLOCK};
 use nix::errno::Errno;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
 use nix::sys::socket::{connect, socket, AddressFamily, SockFlag, SockType, VsockAddr};
-use posix_acl::{PosixACL, Qualifier, ACL_READ, ACL_WRITE};
 use std::collections::HashMap;
-use std::env;
-use std::fs::File;
+use std::fs::{File, set_permissions, Permissions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
+use std::os::unix::fs::PermissionsExt;
 use std::{mem, slice};
 
 const ADD_DEVICE: u32 = MessageType::AddDevice as u32;
@@ -41,7 +40,7 @@ where
     bm
 }
 
-fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>) {
+fn init_uinput(sock: &mut UnixStream) -> (u64, UInputHandle<File>) {
     let mut add_dev_data = [0u8; mem::size_of::<AddDevice>()];
     sock.read_exact(&mut add_dev_data).unwrap();
     let add_dev = unsafe {
@@ -120,9 +119,12 @@ fn init_uinput(sock: &mut UnixStream, user_id: u32) -> (u64, UInputHandle<File>)
         })
         .unwrap();
     uinput.dev_create().unwrap();
-    let mut acl = PosixACL::read_acl(uinput.evdev_path().unwrap()).unwrap();
-    acl.set(Qualifier::User(user_id), ACL_READ | ACL_WRITE);
-    acl.write_acl(uinput.evdev_path().unwrap()).unwrap();
+
+    // Set permissions to allow the VM access to the input device.
+    // Given we're running this inside the VM, there's no need to get fancy.
+    let ev_path = uinput.evdev_path().unwrap();
+    set_permissions(ev_path, Permissions::from_mode(0o666)).unwrap();
+
     (add_dev.id, uinput)
 }
 
@@ -144,7 +146,6 @@ fn ff_effect_empty() -> ff_effect {
 }
 
 fn main() {
-    let user_id = env::args().nth(1).unwrap().parse::<u32>().unwrap();
     let sock_fd = socket(
         AddressFamily::Vsock,
         SockType::Stream,
@@ -192,7 +193,7 @@ fn main() {
             sock.read_exact(&mut cmd_data).unwrap();
             match u32::from_ne_bytes(cmd_data) {
                 ADD_DEVICE => {
-                    let (id, uinput) = init_uinput(&mut sock, user_id);
+                    let (id, uinput) = init_uinput(&mut sock);
                     let raw = uinput.as_inner().as_raw_fd() as u64;
                     epoll
                         .add(uinput.as_inner(), EpollEvent::new(EpollFlags::EPOLLIN, raw))
