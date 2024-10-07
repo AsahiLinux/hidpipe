@@ -19,7 +19,7 @@ use input_linux_sys::{
 use nix::errno::Errno;
 use nix::sys::socket::{AddressFamily, connect, socket, SockFlag, SockType, VsockAddr};
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollTimeout};
-use hidpipe_shared::{
+use hidpipe::{
     AddDevice, ClientHello, MessageType, RemoveDevice, ServerHello, InputEvent,
     empty_input_event, struct_to_socket, FFUpload, FFErase
 };
