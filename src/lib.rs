@@ -1,22 +1,22 @@
-use std::{slice, mem};
+use input_linux::sys::{ff_effect, input_event, timeval};
+use input_linux::{
+    bitmask::BitmaskTrait, AbsoluteAxis, EventKind, ForceFeedbackKind, InputId, InputProperty, Key,
+    LedKind, MiscKind, RelativeAxis, SoundKind, SwitchKind,
+};
 use std::io::{Result, Write};
 use std::os::unix::net::UnixStream;
-use input_linux::{
-    InputProperty, EventKind, AbsoluteAxis, Key, RelativeAxis, ForceFeedbackKind,
-    MiscKind, LedKind, SoundKind, SwitchKind, InputId, bitmask::BitmaskTrait
-};
-use input_linux::sys::{input_event, timeval, ff_effect};
+use std::{mem, slice};
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct ClientHello {
-    pub version: u32
+    pub version: u32,
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct ServerHello {
-    pub version: u32
+    pub version: u32,
 }
 
 #[repr(u32)]
@@ -26,7 +26,7 @@ pub enum MessageType {
     RemoveDevice,
     InputEvent,
     FFUpload,
-    FFErase
+    FFErase,
 }
 
 #[repr(C)]
@@ -34,7 +34,7 @@ pub enum MessageType {
 pub struct FFUpload {
     pub id: u64,
     pub request_id: u32,
-    pub effect: ff_effect
+    pub effect: ff_effect,
 }
 
 #[repr(C)]
@@ -52,7 +52,7 @@ pub struct AddDevice {
     pub evbits: <EventKind as BitmaskTrait>::Array,
     pub keybits: <Key as BitmaskTrait>::Array,
     pub relbits: <RelativeAxis as BitmaskTrait>::Array,
-    pub absbits: <AbsoluteAxis  as BitmaskTrait>::Array,
+    pub absbits: <AbsoluteAxis as BitmaskTrait>::Array,
     pub mscbits: <MiscKind as BitmaskTrait>::Array,
     pub ledbits: <LedKind as BitmaskTrait>::Array,
     pub sndbits: <SoundKind as BitmaskTrait>::Array,
@@ -67,7 +67,7 @@ pub struct AddDevice {
 #[repr(C)]
 #[derive(Debug)]
 pub struct RemoveDevice {
-    pub id: u64
+    pub id: u64,
 }
 
 #[repr(C)]
@@ -96,7 +96,7 @@ impl InputEvent {
         input_event {
             time: timeval {
                 tv_sec: self.time_sec,
-                tv_usec: self.time_usec
+                tv_usec: self.time_usec,
             },
             type_: self.ty,
             code: self.code,
@@ -107,7 +107,10 @@ impl InputEvent {
 
 pub fn empty_input_event() -> input_event {
     input_event {
-        time: timeval { tv_sec: 0, tv_usec: 0 },
+        time: timeval {
+            tv_sec: 0,
+            tv_usec: 0,
+        },
         type_: 0,
         code: 0,
         value: 0,
@@ -118,8 +121,6 @@ pub fn struct_to_socket<T>(socket: &mut UnixStream, data: &T) -> Result<()> {
     let size = mem::size_of::<T>();
     // SAFETY:
     // We are taking a ref, so it is valid for reads, properly aligned, and nobody can write to it
-    let v = unsafe {
-        slice::from_raw_parts(data as *const T as *const u8, size)
-    };
+    let v = unsafe { slice::from_raw_parts(data as *const T as *const u8, size) };
     socket.write_all(v)
 }
