@@ -1,6 +1,8 @@
 # hidpipe
 Pass input devices through to virtual machines
 
+**NOTE:** this project was merged into [muvm](https://github.com/AsahiLinux/muvm) and is no longer actively developed.
+
 ## Dependencies
 udev, uinput enabled in kernel config
 
